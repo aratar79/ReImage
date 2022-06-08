@@ -49,10 +49,10 @@ def process_folder(path):
     if BACKUP:
         for file in tqdm(content, ascii=True, desc="Create image backup"):
             if filetype.is_image(path + "/" + file):
-                    shutil.copy(
-                        path + "/" + file,
-                        BACKUP + "/" + path + "/" + file,
-                    )
+                shutil.copy(
+                    path + "/" + file,
+                    BACKUP + "/" + path + "/" + file,
+                )
 
     for file in tqdm(content, ascii=True, desc="Image processing"):
         process_file(file, False)
@@ -86,25 +86,37 @@ def process_folder_recursive(path):
 
 def process_file(file, verbose=False):
     try:
+        processed = False
         weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
+        #print(file)
+        #print(weight)
+        #print(MAX_FILE_WEIGHT)
+        #print(filetype.is_image(file))
         if weight > MAX_FILE_WEIGHT and filetype.is_image(file):
             img = Image.open(file)
+            img = img.convert('RGB')
             width, height = img.size
             scale = float("{0:.2f}".format(math.sqrt(MAX_FILE_WEIGHT / weight)))
             new_width = int(width * scale)
             new_height = int(height * scale)
             img = img.resize((new_width, new_height))
+            processed = True
+        else:
+            #print("No aplica por tamanio o formato")
+            global_no_processed_files(file)
+
+    except Exception as e:
+        #print(e)
+        global_no_processed_files(file)
+        pass
+
+    finally:
+        if processed:
             img.save(file)
             global_processed_files(file)
             if verbose:
                 new_weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
                 print(f"Original weight: {weight} KB, after ReImage: {new_weight} KB")
-        else:
-            global_no_processed_files(file)
-
-    except Exception as e:
-        global_no_processed_files(file)
-        pass
 
 
 def main(argv):
@@ -160,14 +172,13 @@ def main(argv):
         else:
             print("Error in flag and arguments combination")
             parser.print_help()
-        
+
         print("\n")
         for nopfile in no_processed_files:
             print("Not processed file: " + nopfile)
 
         print(f"\n\nTotal number of files NOT processed: {len(no_processed_files)}")
         print(f"Total number of files processed: {len(processed_files)}")
-
 
     except Exception as e:
         pass
