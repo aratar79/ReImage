@@ -99,7 +99,7 @@ def process_file(file, verbose=False):
         processed = False
         weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
         loggerApp.info(
-            f"File to process: {file}, is an image: filetype.is_image(file), File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
+            f'File to process: {file}, is an image: {filetype.is_image(file)}, File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}'
         )
         if weight > MAX_FILE_WEIGHT and filetype.is_image(file):
             loggerApp.info(f"The file fulfils the conditions")
@@ -119,10 +119,10 @@ def process_file(file, verbose=False):
 
     except Exception as e:
         loggerErr.error(
-            f"File to process: {file}, is an image: filetype.is_image(file), File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
+            f'File to process: {file}, is an image: filetype.is_image(file), File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}'
         )
-        loggerErr.error(f"The file has not been processed, an error has occurred.")
-        loggerErr.error(f"ERROR: {e}")
+        loggerErr.error(f'The file has not been processed, an error has occurred.')
+        loggerErr.error(f'ERROR: {e}')
         global_no_processed_files(file)
         pass
 
@@ -132,19 +132,19 @@ def process_file(file, verbose=False):
                 img.save(file)
                 new_weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
                 loggerApp.info(
-                    f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
+                    f'Original weight: {weight} KB, after ReImage: {new_weight} KB'
                 )
-                loggerApp.info(f"file saved and processed")
+                loggerApp.info(f'file saved and processed')
                 global_processed_files(file)
                 if verbose:
                     print(
-                        f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
+                        f'Original weight: {weight} KB, after ReImage: {new_weight} KB'
                     )
             except Exception as e:
                 loggerErr.error(
-                    f"The file {file} has not been saved, an error has occurred."
+                    f'The file {file} has not been saved, an error has occurred.'
                 )
-                loggerErr.error(f"ERROR: {e}")
+                loggerErr.error(f'ERROR: {e}')
 
 
 def setup_logger(name, log_file, level=logging.INFO):
