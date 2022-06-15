@@ -1,3 +1,5 @@
+from email import header
+from email.mime import image
 import sys
 import os
 import shutil
@@ -10,6 +12,7 @@ from datetime import datetime
 from tqdm import tqdm
 from PIL import Image
 from PIL import UnidentifiedImageError
+from tabulate import tabulate
 
 global no_processed_files
 global processed_files
@@ -35,6 +38,11 @@ def global_backup(path):
     os.makedirs(BACKUP, exist_ok=True)
 
 
+def global_info(info):
+    global INFO
+    INFO = info
+
+
 def process_only_file(file, verbose=False):
     if not os.path.exists(file):
         loggerErr.error("The file {file} does not exist.")
@@ -46,6 +54,11 @@ def process_only_file(file, verbose=False):
         loggerApp.info("Start backup....")
         loggerApp.info(f"BKP FILE: {file}")
         shutil.copy(file, BACKUP + "/" + file)
+    if INFO:
+        images = []
+        images.append(get_info_image(file))
+        print_info_image(images)
+        return
     process_file(file, verbose)
 
 
@@ -60,12 +73,19 @@ def process_folder(path):
                     path + "/" + file,
                     BACKUP + "/" + path + "/" + file,
                 )
+    if INFO:
+        path = os.path.abspath(path)
+        folder_content = [f for f in os.listdir(path)]
+        images = [get_info_image(f"{path}/{i}") for i in folder_content]
+        print_info_image(images)
+        return
 
     for file in tqdm(content, ascii=True, desc="Image processing"):
         process_file(file, False)
 
 
 def process_folder_recursive(path):
+    images = []
     if BACKUP:
         loggerApp.info("Start backup....")
         for name_folder, sub_forders, files in tqdm(
@@ -83,6 +103,14 @@ def process_folder_recursive(path):
                         name_folder + "/" + file,
                         BACKUP + "/" + name_folder + "/" + file,
                     )
+    if INFO:
+        path = os.path.abspath(path)
+        for name_folder, sub_forders, files in os.walk(path, topdown=False):
+            for file in files:
+                file_path = f"{name_folder}/{file}"
+                images.append(get_info_image(file_path))
+        print_info_image(images)
+        return
 
     for name_folder, sub_forders, files in tqdm(
         os.walk(path, topdown=False), ascii=True, desc="Image processing"
@@ -99,7 +127,7 @@ def process_file(file, verbose=False):
         processed = False
         weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
         loggerApp.info(
-            f'File to process: {file}, is an image: {filetype.is_image(file)}, File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}'
+            f"File to process: {file}, is an image: {filetype.is_image(file)}, File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
         )
         if weight > MAX_FILE_WEIGHT and filetype.is_image(file):
             loggerApp.info(f"The file fulfils the conditions")
@@ -119,10 +147,10 @@ def process_file(file, verbose=False):
 
     except Exception as e:
         loggerErr.error(
-            f'File to process: {file}, is an image: filetype.is_image(file), File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}'
+            f"File to process: {file}, is an image: filetype.is_image(file), File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
         )
-        loggerErr.error(f'The file has not been processed, an error has occurred.')
-        loggerErr.error(f'ERROR: {e}')
+        loggerErr.error(f"The file has not been processed, an error has occurred.")
+        loggerErr.error(f"ERROR: {e}")
         global_no_processed_files(file)
         pass
 
@@ -132,19 +160,99 @@ def process_file(file, verbose=False):
                 img.save(file)
                 new_weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
                 loggerApp.info(
-                    f'Original weight: {weight} KB, after ReImage: {new_weight} KB'
+                    f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
                 )
-                loggerApp.info(f'file saved and processed')
+                loggerApp.info(f"file saved and processed")
                 global_processed_files(file)
                 if verbose:
                     print(
-                        f'Original weight: {weight} KB, after ReImage: {new_weight} KB'
+                        f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
                     )
             except Exception as e:
                 loggerErr.error(
-                    f'The file {file} has not been saved, an error has occurred.'
+                    f"The file {file} has not been saved, an error has occurred."
                 )
-                loggerErr.error(f'ERROR: {e}')
+                loggerErr.error(f"ERROR: {e}")
+
+
+def info_folder_recursive(path):
+    pass
+
+
+def print_info_image(images):
+    filterded_images = [i for i in images if not i == None]
+    header_info = [
+        "idx",
+        "File Name",
+        "Size",
+        "Ratio",
+        "Orientation",
+        "Format",
+        "Dpi's",
+        "Mode",
+        "Weight",
+    ]
+    print("\n")
+    print(
+        tabulate(
+            filterded_images, headers=header_info, showindex="always", tablefmt="simple"
+        )
+    )
+    print("\n")
+
+
+def get_info_image(file):
+    result = []
+    try:
+        if filetype.is_image(file):
+            image = Image.open(file)
+            # get width and height
+            width, height = image.size
+            # get image ratio
+            ratio = ""
+            rt = width / height
+            rt = float("{0:.2f}".format(rt))
+            if rt == 1:
+                ratio = "1:1"
+            elif rt == 1.33:
+                ratio = "4:3"
+            elif rt == 1.50:
+                ratio = "3:2"
+            else:
+                ratio = "Don't know"
+            # get image orientation
+            orientation = ""
+            if width > height:
+                orientation = "Horizontal"
+            if width < height:
+                orientation = "Vertical"
+            if width == height:
+                orientation = "Equals"
+            # get image format
+            formt = image.format
+            # get image mode
+            mode = image.mode
+            # get image dpi's
+            dpi = image.info.get("dpi")
+            # get image Weight
+            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
+
+            result.append(os.path.split(file)[-1])
+            result.append({f"w:{width}", f"h:{height}"})
+            result.append(ratio)
+            result.append(orientation)
+            result.append(formt)
+            result.append(dpi)
+            result.append(mode)
+            result.append(f"{weight} KB")
+
+            return result
+
+    except Exception as e:
+        loggerErr.error(
+            f"Checking the image information: {file} an error has occurred."
+        )
+        loggerErr.error(f"ERROR: {e}")
 
 
 def setup_logger(name, log_file, level=logging.INFO):
@@ -182,6 +290,7 @@ def main(argv):
     try:
 
         parser = argv
+
         parser.add_argument(
             "-cw",
             "--change-max-weight",
@@ -190,10 +299,17 @@ def main(argv):
             default=0,
             metavar=("MAXWEIGHT"),
         )
+        parser.add_argument(
+            "-i",
+            "--info",
+            help="Returns information related to the image(s)",
+            action="store_true",
+        )
         parser.add_argument("-f", "--file", help="Name of the file to be processed.")
         parser.add_argument(
             "-a", "--all", help="Processes all files in the folder", metavar=("PATH")
         )
+
         parser.add_argument(
             "-bkp",
             "--backup",
@@ -238,20 +354,30 @@ def main(argv):
             else:
                 print("Error in flag and arguments combination")
                 parser.print_help()
+        elif arguments.info:
+            global_info(True)
+            if arguments.file:
+                process_only_file(arguments.file)
+            if arguments.all:
+                if arguments.recursive:
+                    process_folder_recursive(arguments.all)
+                else:
+                    process_folder(arguments.all)
         else:
             print("Error in flag and arguments combination")
             parser.print_help()
 
         print("\n")
-        for nopfile in no_processed_files:
-            loggerNoProcess.warning(f"Not processed file: {nopfile}")
+        if not INFO:
+            for nopfile in no_processed_files:
+                loggerNoProcess.warning(f"Not processed file: {nopfile}")
 
-        loggerApp.info(
-            f"\n\nTotal number of files NOT processed: {len(no_processed_files)}"
-        )
-        loggerApp.info(f"Total number of files processed: {len(processed_files)}")
-        print(f"\n\nTotal number of files NOT processed: {len(no_processed_files)}")
-        print(f"Total number of files processed: {len(processed_files)}")
+            loggerApp.info(
+                f"\n\nTotal number of files NOT processed: {len(no_processed_files)}"
+            )
+            loggerApp.info(f"Total number of files processed: {len(processed_files)}")
+            print(f"\nTotal number of files NOT processed: {len(no_processed_files)}")
+            print(f"Total number of files processed: {len(processed_files)}")
 
     except Exception as e:
         loggerErr.error(f"Some error has occurred, process terminated")
@@ -260,6 +386,7 @@ def main(argv):
 
 if __name__ == "__main__":
     logger_config()
+    global_info(False)
     no_processed_files = []
     processed_files = []
     now = datetime.now()
