@@ -120,6 +120,8 @@ def process_folder_recursive(path):
             backup_folder = os.path.split(BACKUP)[-1]
             if name_folder != None and backup_folder in name_folder:
                 continue
+            for file in files:
+                process_file(name_folder + "/" + file, False)
         else:
             if name_folder != None:
                 for file in files:
