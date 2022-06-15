@@ -360,3 +360,6 @@ build/
 dist/
 test/
 prueba_1/
+
+*.spec
+*.pyproj
