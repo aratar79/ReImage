@@ -1,5 +1,3 @@
-from email import header
-from email.mime import image
 import sys
 import os
 import shutil
