@@ -68,7 +68,12 @@ def process_only_file(file, verbose=False, resize=False):
 
 
 def process_folder(path, resize=False):
-    content = [f for f in os.listdir(path) if os.path.isfile(f)]
+    # content = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+    content = [
+        os.path.join(path, f)
+        for f in os.listdir(path)
+        if os.path.isfile(os.path.join(path, f))
+    ]
     if BACKUP:
         loggerApp.info("Start backup....")
         for file in tqdm(content, ascii=True, desc="Create image backup"):
@@ -139,14 +144,15 @@ def process_file(file, verbose=False, resize=False):
 
         if resize:
             width, height = img.size
+            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
             loggerApp.info(
                 f"File to process: {file}, is an image: {filetype.is_image(file)}, "
                 f"File width: {width} px, change to: {IMG_WIDTH}"
             )
-            radio = max(width / img.size[0], 0 / img.size[1])
+            radio = max(IMG_WIDTH / img.size[0], 0 / img.size[1])
             new_width = int(img.size[0] * radio)
             new_height = int(img.size[1] * radio)
-            img = img.resize((new_width, new_height), Image.ANTIALIAS)
+            img = img.resize((new_width, new_height))
             processed = True
         else:
             weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
