@@ -3,14 +3,12 @@ import os
 import shutil
 import argparse
 import math
-from turtle import back
 import filetype
 import logging
 
 from datetime import datetime
 from tqdm import tqdm
 from PIL import Image
-from PIL import UnidentifiedImageError
 from tabulate import tabulate
 
 global no_processed_files
@@ -38,7 +36,7 @@ def global_processed_files(file):
 
 def global_backup(path):
     global BACKUP
-    BACKUP = path + "/ReImageBKP_" + format_date
+    BACKUP = os.path.join(path, "ReImageBKP_" + format_date)
     os.makedirs(BACKUP, exist_ok=True)
 
 
@@ -49,18 +47,20 @@ def global_info(info):
 
 def process_only_file(file, verbose=False, resize=False):
     if not os.path.exists(file):
-        loggerErr.error("The file {file} does not exist.")
+        loggerErr.error(f"The file {file} does not exist.")
         loggerErr.error("Process finished.")
         print(f"\nThe file {file} does not exist.")
         print("Process finished.")
         sys.exit()
+    
     if BACKUP:
         loggerApp.info("Start backup....")
         loggerApp.info(f"BKP FILE: {file}")
-        shutil.copy(file, BACKUP + "/" + file)
+        backup_path = os.path.join(BACKUP, os.path.basename(file))
+        shutil.copy(file, backup_path)
+
     if INFO:
-        images = []
-        images.append(get_info_image(file))
+        images = [get_info_image(file)]
         print_info_image(images)
         return
 
@@ -68,25 +68,32 @@ def process_only_file(file, verbose=False, resize=False):
 
 
 def process_folder(path, resize=False):
-    # content = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+
     content = [
         os.path.join(path, f)
         for f in os.listdir(path)
         if os.path.isfile(os.path.join(path, f))
     ]
+
     if BACKUP:
         loggerApp.info("Start backup....")
         for file in tqdm(content, ascii=True, desc="Create image backup"):
-            if filetype.is_image(path + "/" + file):
-                loggerApp.info(f"BKP FILE: {file}")
-                shutil.copy(
-                    path + "/" + file,
-                    BACKUP + "/" + path + "/" + file,
-                )
+            if filetype.is_image(
+                file
+            ):  
+                loggerApp.info(
+                    f"BKP FILE: {os.path.basename(file)}"
+                )  
+                backup_path = os.path.join(BACKUP, os.path.basename(file))
+                os.makedirs(
+                    os.path.dirname(backup_path), exist_ok=True
+                )  
+                shutil.copy(file, backup_path)
+
     if INFO:
         path = os.path.abspath(path)
-        folder_content = [f for f in os.listdir(path)]
-        images = [get_info_image(f"{path}/{i}") for i in folder_content]
+        folder_content = [os.path.join(path, f) for f in os.listdir(path)]
+        images = [get_info_image(img_path) for img_path in folder_content]
         print_info_image(images)
         return
 
@@ -96,45 +103,46 @@ def process_folder(path, resize=False):
 
 def process_folder_recursive(path, resize=False):
     images = []
+
     if BACKUP:
         loggerApp.info("Start backup....")
-        for name_folder, sub_forders, files in tqdm(
+        for name_folder, sub_folders, files in tqdm(
             os.walk(path, topdown=False), ascii=True, desc="Create image backup"
         ):
-            backup_folder = os.path.split(BACKUP)[-1]
+            backup_folder = os.path.basename(BACKUP)  
             loggerApp.info(f"BKP FOLDER: {name_folder}")
-            if name_folder is not None and backup_folder in name_folder:
+            if name_folder and backup_folder in name_folder:
                 continue
-            os.makedirs(BACKUP + "/" + name_folder, exist_ok=True)
+            backup_path = os.path.join(BACKUP, name_folder)
+            os.makedirs(backup_path, exist_ok=True)
             for file in files:
-                if filetype.is_image(name_folder + "/" + file):
+                if filetype.is_image(os.path.join(name_folder, file)):
                     loggerApp.info(f"BKP FILE: {file}")
                     shutil.copy(
-                        name_folder + "/" + file,
-                        BACKUP + "/" + name_folder + "/" + file,
+                        os.path.join(name_folder, file),
+                        os.path.join(backup_path, file),
                     )
+
     if INFO:
         path = os.path.abspath(path)
-        for name_folder, sub_forders, files in os.walk(path, topdown=False):
+        for name_folder, sub_folders, files in os.walk(path, topdown=False):
             for file in files:
-                file_path = f"{name_folder}/{file}"
-                images.append(get_info_image(file_path))
+                images.append(get_info_image(os.path.join(name_folder, file)))
         print_info_image(images)
         return
 
-    for name_folder, sub_forders, files in tqdm(
+    for name_folder, sub_folders, files in tqdm(
         os.walk(path, topdown=False), ascii=True, desc="Image processing"
     ):
-        if BACKUP:
-            backup_folder = os.path.split(BACKUP)[-1]
-            if name_folder is not None and backup_folder in name_folder:
-                continue
-            for file in files:
-                process_file(name_folder + "/" + file, False)
-        else:
-            if name_folder is not None:
-                for file in files:
-                    process_file(name_folder + "/" + file, False)
+        for file in files:
+            if BACKUP:
+                backup_folder = os.path.basename(BACKUP)
+                if name_folder and backup_folder in name_folder:
+                    continue
+                process_file(os.path.join(name_folder, file), False)
+            else:
+                if name_folder:
+                    process_file(os.path.join(name_folder, file), False, resize)
 
 
 def process_file(file, verbose=False, resize=False):
@@ -144,6 +152,7 @@ def process_file(file, verbose=False, resize=False):
 
         if resize:
             width, height = img.size
+            img = img.convert("RGB")
             weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
             loggerApp.info(
                 f"File to process: {file}, is an image: {filetype.is_image(file)}, "
@@ -215,7 +224,7 @@ def info_folder_recursive(path):
 
 
 def print_info_image(images):
-    filterded_images = [i for i in images if not i == None]
+    filterded_images = [i for i in images if i is not None]
     header_info = [
         "idx",
         "File Name",

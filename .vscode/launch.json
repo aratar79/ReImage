@@ -11,7 +11,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["-bkp", "C:/Users/arata/source/repos/ReImage/Pruebas" ,"-r", "500", "-a", "C:/Users/arata/source/repos/ReImage/Pruebas"]
+            "args": ["-bkp", "C:/Users/arata/source/repos/ReImage/Pruebas" ,"-cw", "50", "-a", "C:/Users/arata/source/repos/ReImage/Pruebas"]
         }
     ]
 }
