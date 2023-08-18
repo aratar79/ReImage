@@ -3,14 +3,12 @@ import os
 import shutil
 import argparse
 import math
-from turtle import back
 import filetype
 import logging
 
 from datetime import datetime
 from tqdm import tqdm
 from PIL import Image
-from PIL import UnidentifiedImageError
 from tabulate import tabulate
 
 global no_processed_files
@@ -23,6 +21,11 @@ def global_max_weight(weightFile):
     MAX_FILE_WEIGHT = weightFile
 
 
+def global_width(imgWidth):
+    global IMG_WIDTH
+    IMG_WIDTH = imgWidth
+
+
 def global_no_processed_files(file):
     no_processed_files.append(file)
 
@@ -33,7 +36,7 @@ def global_processed_files(file):
 
 def global_backup(path):
     global BACKUP
-    BACKUP = path + "/ReImageBKP_" + format_date
+    BACKUP = os.path.join(path, "ReImageBKP_" + format_date)
     os.makedirs(BACKUP, exist_ok=True)
 
 
@@ -42,131 +45,168 @@ def global_info(info):
     INFO = info
 
 
-def process_only_file(file, verbose=False):
+def process_only_file(file, verbose=False, resize=False):
     if not os.path.exists(file):
-        loggerErr.error("The file {file} does not exist.")
-        loggerErr.error(f"Process finished.")
+        loggerErr.error(f"The file {file} does not exist.")
+        loggerErr.error("Process finished.")
         print(f"\nThe file {file} does not exist.")
-        print(f"Process finished.")
+        print("Process finished.")
         sys.exit()
+    
     if BACKUP:
         loggerApp.info("Start backup....")
         loggerApp.info(f"BKP FILE: {file}")
-        shutil.copy(file, BACKUP + "/" + file)
+        backup_path = os.path.join(BACKUP, os.path.basename(file))
+        shutil.copy(file, backup_path)
+
     if INFO:
-        images = []
-        images.append(get_info_image(file))
+        images = [get_info_image(file)]
         print_info_image(images)
         return
-    process_file(file, verbose)
+
+    process_file(file, verbose, resize)
 
 
-def process_folder(path):
-    content = [f for f in os.listdir(path) if os.path.isfile(f)]
+def process_folder(path, resize=False):
+
+    content = [
+        os.path.join(path, f)
+        for f in os.listdir(path)
+        if os.path.isfile(os.path.join(path, f))
+    ]
+
     if BACKUP:
         loggerApp.info("Start backup....")
         for file in tqdm(content, ascii=True, desc="Create image backup"):
-            if filetype.is_image(path + "/" + file):
-                loggerApp.info(f"BKP FILE: {file}")
-                shutil.copy(
-                    path + "/" + file,
-                    BACKUP + "/" + path + "/" + file,
-                )
+            if filetype.is_image(
+                file
+            ):  
+                loggerApp.info(
+                    f"BKP FILE: {os.path.basename(file)}"
+                )  
+                backup_path = os.path.join(BACKUP, os.path.basename(file))
+                os.makedirs(
+                    os.path.dirname(backup_path), exist_ok=True
+                )  
+                shutil.copy(file, backup_path)
+
     if INFO:
         path = os.path.abspath(path)
-        folder_content = [f for f in os.listdir(path)]
-        images = [get_info_image(f"{path}/{i}") for i in folder_content]
+        folder_content = [os.path.join(path, f) for f in os.listdir(path)]
+        images = [get_info_image(img_path) for img_path in folder_content]
         print_info_image(images)
         return
 
     for file in tqdm(content, ascii=True, desc="Image processing"):
-        process_file(file, False)
+        process_file(file, False, resize)
 
 
-def process_folder_recursive(path):
+def process_folder_recursive(path, resize=False):
     images = []
+
     if BACKUP:
         loggerApp.info("Start backup....")
-        for name_folder, sub_forders, files in tqdm(
+        for name_folder, sub_folders, files in tqdm(
             os.walk(path, topdown=False), ascii=True, desc="Create image backup"
         ):
-            backup_folder = os.path.split(BACKUP)[-1]
+            backup_folder = os.path.basename(BACKUP)  
             loggerApp.info(f"BKP FOLDER: {name_folder}")
-            if name_folder != None and backup_folder in name_folder:
+            if name_folder and backup_folder in name_folder:
                 continue
-            os.makedirs(BACKUP + "/" + name_folder, exist_ok=True)
+            backup_path = os.path.join(BACKUP, name_folder)
+            os.makedirs(backup_path, exist_ok=True)
             for file in files:
-                if filetype.is_image(name_folder + "/" + file):
+                if filetype.is_image(os.path.join(name_folder, file)):
                     loggerApp.info(f"BKP FILE: {file}")
                     shutil.copy(
-                        name_folder + "/" + file,
-                        BACKUP + "/" + name_folder + "/" + file,
+                        os.path.join(name_folder, file),
+                        os.path.join(backup_path, file),
                     )
+
     if INFO:
         path = os.path.abspath(path)
-        for name_folder, sub_forders, files in os.walk(path, topdown=False):
+        for name_folder, sub_folders, files in os.walk(path, topdown=False):
             for file in files:
-                file_path = f"{name_folder}/{file}"
-                images.append(get_info_image(file_path))
+                images.append(get_info_image(os.path.join(name_folder, file)))
         print_info_image(images)
         return
 
-    for name_folder, sub_forders, files in tqdm(
+    for name_folder, sub_folders, files in tqdm(
         os.walk(path, topdown=False), ascii=True, desc="Image processing"
     ):
-        if BACKUP:
-            backup_folder = os.path.split(BACKUP)[-1]
-            if name_folder != None and backup_folder in name_folder:
-                continue
-            for file in files:
-                process_file(name_folder + "/" + file, False)
-        else:
-            if name_folder != None:
-                for file in files:
-                    process_file(name_folder + "/" + file, False)
+        for file in files:
+            if BACKUP:
+                backup_folder = os.path.basename(BACKUP)
+                if name_folder and backup_folder in name_folder:
+                    continue
+                process_file(os.path.join(name_folder, file), False)
+            else:
+                if name_folder:
+                    process_file(os.path.join(name_folder, file), False, resize)
 
 
-def process_file(file, verbose=False):
+def process_file(file, verbose=False, resize=False):
     try:
         processed = False
-        weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
-        loggerApp.info(
-            f"File to process: {file}, is an image: {filetype.is_image(file)}, File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
-        )
-        if weight > MAX_FILE_WEIGHT and filetype.is_image(file):
-            loggerApp.info(f"The file fulfils the conditions")
-            img = Image.open(file)
-            img = img.convert("RGB")
+        img = Image.open(file)
+
+        if resize:
             width, height = img.size
-            scale = float("{0:.2f}".format(math.sqrt(MAX_FILE_WEIGHT / weight)))
-            new_width = int(width * scale)
-            new_height = int(height * scale)
+            img = img.convert("RGB")
+            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
+            loggerApp.info(
+                f"File to process: {file}, is an image: {filetype.is_image(file)}, "
+                f"File width: {width} px, change to: {IMG_WIDTH}"
+            )
+            radio = max(IMG_WIDTH / img.size[0], 0 / img.size[1])
+            new_width = int(img.size[0] * radio)
+            new_height = int(img.size[1] * radio)
             img = img.resize((new_width, new_height))
             processed = True
         else:
+            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
             loggerApp.info(
-                f"The file does not meet the conditions, either it is not an image or it is too large."
+                f"File to process: {file}, is an image: {filetype.is_image(file)}, "
+                f"File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
             )
-            global_no_processed_files(file)
+
+            if weight > MAX_FILE_WEIGHT and filetype.is_image(file):
+                loggerApp.info("The file fulfils the conditions")
+                img = img.convert("RGB")
+                width, height = img.size
+                scale = float("{0:.2f}".format(math.sqrt(MAX_FILE_WEIGHT / weight)))
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                img = img.resize((new_width, new_height))
+                processed = True
+            else:
+                loggerApp.info(
+                    "The file does not meet the conditions, either it is not an image"
+                    " or it is too large."
+                )
+                global_no_processed_files(file)
 
     except Exception as e:
         loggerErr.error(
-            f"File to process: {file}, is an image: filetype.is_image(file), File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
+            f"File to process: {file}, is an image: filetype.is_image(file), "
+            f"File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
         )
-        loggerErr.error(f"The file has not been processed, an error has occurred.")
-        loggerErr.error(f"ERROR: {e}")
+        loggerErr.error("The file has not been processed, an error has occurred.")
+        loggerErr.error("ERROR: {e}")
         global_no_processed_files(file)
         pass
 
     finally:
         if processed:
             try:
+                width, height = img.size
                 img.save(file)
                 new_weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
                 loggerApp.info(
                     f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
+                    f"and {width}x{height}"
                 )
-                loggerApp.info(f"file saved and processed")
+                loggerApp.info("file saved and processed")
                 global_processed_files(file)
                 if verbose:
                     print(
@@ -184,7 +224,7 @@ def info_folder_recursive(path):
 
 
 def print_info_image(images):
-    filterded_images = [i for i in images if not i == None]
+    filterded_images = [i for i in images if i is not None]
     header_info = [
         "idx",
         "File Name",
@@ -292,7 +332,6 @@ def logger_config():
 
 def main(argv):
     try:
-
         parser = argv
 
         parser.add_argument(
@@ -327,6 +366,15 @@ def main(argv):
             action="store_true",
         )
 
+        parser.add_argument(
+            "-r",
+            "--resize",
+            help="Resize images while maintaining aspect ratio",
+            type=int,
+            default=0,
+            metavar=("WIDTH"),
+        )
+
         arguments = parser.parse_args()
 
         loggerApp.info("Run process...")
@@ -340,20 +388,23 @@ def main(argv):
             BACKUP = False
 
         if arguments.change_max_weight:
-
             global_max_weight(float(arguments.change_max_weight))
 
+            if arguments.change_max_weight and arguments.resize:
+                print("Error in flag and arguments combination")
+                parser.print_help()
+
             if arguments.file:
-                loggerApp.info(f"Start the process for a single file")
+                loggerApp.info("Start the process for a single file")
                 process_only_file(arguments.file, True)
             elif arguments.all and arguments.file is None:
                 if arguments.recursive:
                     loggerApp.info(
-                        f"Start the recursive process, all the files and directories"
+                        "Start the recursive process, all the files and directories"
                     )
                     process_folder_recursive(arguments.all)
                 else:
-                    loggerApp.info(f"Start the process for all files in the directory")
+                    loggerApp.info("Start the process for all files in the directory")
                     process_folder(arguments.all)
             else:
                 print("Error in flag and arguments combination")
@@ -367,6 +418,24 @@ def main(argv):
                     process_folder_recursive(arguments.all)
                 else:
                     process_folder(arguments.all)
+        elif arguments.resize:
+            global_width(float(arguments.resize))
+            if arguments.file:
+                loggerApp.info("Start the process for a single file")
+                process_only_file(arguments.file, True, True)
+            elif arguments.all and arguments.file is None:
+                if arguments.recursive:
+                    loggerApp.info(
+                        "Start the recursive process, all the files and directories"
+                    )
+                    process_folder_recursive(arguments.all, True)
+                else:
+                    loggerApp.info("Start the process for all files in the directory")
+                    process_folder(arguments.all, True)
+            else:
+                print("Error in flag and arguments combination")
+                parser.print_help()
+
         else:
             print("Error in flag and arguments combination")
             parser.print_help()
@@ -384,7 +453,7 @@ def main(argv):
             print(f"Total number of files processed: {len(processed_files)}")
 
     except Exception as e:
-        loggerErr.error(f"Some error has occurred, process terminated")
+        loggerErr.error("Some error has occurred, process terminated")
         loggerErr.error(f"ERROR: {e}")
 
 
