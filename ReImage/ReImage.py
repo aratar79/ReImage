@@ -1,3 +1,4 @@
+import io
 import sys
 import os
 import shutil
@@ -5,11 +6,13 @@ import argparse
 import math
 import filetype
 import logging
+import requests
 
 from datetime import datetime
 from tqdm import tqdm
 from PIL import Image
 from tabulate import tabulate
+from dotenv import load_dotenv
 
 global no_processed_files
 global processed_files
@@ -45,14 +48,27 @@ def global_info(info):
     INFO = info
 
 
+def global_brm(background_remove):
+    global BKG_REMOVE
+    BKG_REMOVE = background_remove
+
+
+def global_azure_creds():
+    load_dotenv()
+    global AZURE_ENDPOINT, AZURE_KEY
+    AZURE_ENDPOINT = os.getenv("AI_SERVICE_ENDPOINT")
+    AZURE_KEY = os.getenv("AI_SERVICE_KEY")
+
+
 def process_only_file(file, verbose=False, resize=False):
+    rm_bkg_option = False
     if not os.path.exists(file):
         loggerErr.error(f"The file {file} does not exist.")
         loggerErr.error("Process finished.")
         print(f"\nThe file {file} does not exist.")
         print("Process finished.")
         sys.exit()
-    
+
     if BACKUP:
         loggerApp.info("Start backup....")
         loggerApp.info(f"BKP FILE: {file}")
@@ -64,11 +80,13 @@ def process_only_file(file, verbose=False, resize=False):
         print_info_image(images)
         return
 
-    process_file(file, verbose, resize)
+    if BKG_REMOVE:
+        rm_bkg_option = True
+
+    process_file(file, verbose, resize, rm_bkg_option)
 
 
 def process_folder(path, resize=False):
-
     content = [
         os.path.join(path, f)
         for f in os.listdir(path)
@@ -79,15 +97,15 @@ def process_folder(path, resize=False):
         loggerApp.info("Start backup....")
         for file in tqdm(content, ascii=True, desc="Create image backup"):
             if filetype.is_image(
-                file
-            ):  
+                    file
+            ):
                 loggerApp.info(
                     f"BKP FILE: {os.path.basename(file)}"
-                )  
+                )
                 backup_path = os.path.join(BACKUP, os.path.basename(file))
                 os.makedirs(
                     os.path.dirname(backup_path), exist_ok=True
-                )  
+                )
                 shutil.copy(file, backup_path)
 
     if INFO:
@@ -107,9 +125,9 @@ def process_folder_recursive(path, resize=False):
     if BACKUP:
         loggerApp.info("Start backup....")
         for name_folder, sub_folders, files in tqdm(
-            os.walk(path, topdown=False), ascii=True, desc="Create image backup"
+                os.walk(path, topdown=False), ascii=True, desc="Create image backup"
         ):
-            backup_folder = os.path.basename(BACKUP)  
+            backup_folder = os.path.basename(BACKUP)
             loggerApp.info(f"BKP FOLDER: {name_folder}")
             if name_folder and backup_folder in name_folder:
                 continue
@@ -132,7 +150,7 @@ def process_folder_recursive(path, resize=False):
         return
 
     for name_folder, sub_folders, files in tqdm(
-        os.walk(path, topdown=False), ascii=True, desc="Image processing"
+            os.walk(path, topdown=False), ascii=True, desc="Image processing"
     ):
         for file in files:
             if BACKUP:
@@ -145,11 +163,15 @@ def process_folder_recursive(path, resize=False):
                     process_file(os.path.join(name_folder, file), False, resize)
 
 
-def process_file(file, verbose=False, resize=False):
+def process_file(file, verbose=False, resize=False, bkg_remover=False):
     try:
         processed = False
         img = Image.open(file)
 
+        if bkg_remover:
+            img = remove_background(img)
+            if bkg_remover and not resize:
+                processed = True
         if resize:
             width, height = img.size
             img = img.convert("RGB")
@@ -217,6 +239,40 @@ def process_file(file, verbose=False, resize=False):
                     f"The file {file} has not been saved, an error has occurred."
                 )
                 loggerErr.error(f"ERROR: {e}")
+
+
+def remove_background(image):
+    try:
+        # Convertir la imagen a un objeto de bytes
+        image_byte_array = io.BytesIO()
+        image.save(image_byte_array, format=image.format)
+        image_byte_array = image_byte_array.getvalue()
+
+        response = requests.post(
+            url=f"{AZURE_ENDPOINT}/computervision/imageanalysis:segment?api-version=2023-02-01-preview&mode=backgroundRemoval",
+            headers={
+                "Ocp-Apim-Subscription-Key": AZURE_KEY,
+                "Content-Type": "application/octet-stream"
+            },
+            data=image_byte_array
+        )
+
+        if response.status_code == 200:
+            loggerApp.info(f"remove background {response.status_code} processed")
+            # Guardar la imagen procesada en disco
+            processed_image = Image.open(io.BytesIO(response.content))
+            base_name, ext = os.path.splitext(os.path.basename("rb.png"))
+            save_file = os.path.join(os.path.dirname("rb.png"), f"{base_name}_no_bg{ext}")
+            processed_image.save(save_file)
+            loggerApp.info(f"Processed image saved at: {save_file}")
+            return Image.open(io.BytesIO(response.content))
+        else:
+            loggerErr.error(f"ERROR: {response.status_code}")
+            return image  # Retornar la imagen original en caso de error
+
+    except Exception as e:
+        loggerErr.error(f"ERROR: {e}")
+        return image  # Retornar la imagen original en caso de excepción
 
 
 def info_folder_recursive(path):
@@ -359,6 +415,7 @@ def main(argv):
             help="Creates a copy of the original files in a given destination",
             metavar=("BACKUP PATH"),
         )
+
         parser.add_argument(
             "-R",
             "--recursive",
@@ -375,9 +432,19 @@ def main(argv):
             metavar=("WIDTH"),
         )
 
+        parser.add_argument(
+            "-rb",
+            "--remove-background",
+            help="Remove image background using Azure AI Services",
+            action="store_true"
+        )
+
         arguments = parser.parse_args()
 
         loggerApp.info("Run process...")
+
+        if arguments.remove_background:
+            global_brm(True)
 
         if arguments.backup:
             pathname = os.path.abspath(arguments.backup)
@@ -460,6 +527,7 @@ def main(argv):
 if __name__ == "__main__":
     logger_config()
     global_info(False)
+    global_azure_creds()
     no_processed_files = []
     processed_files = []
     now = datetime.now()
