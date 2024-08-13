@@ -259,20 +259,14 @@ def remove_background(image):
 
         if response.status_code == 200:
             loggerApp.info(f"remove background {response.status_code} processed")
-            # Guardar la imagen procesada en disco
-            processed_image = Image.open(io.BytesIO(response.content))
-            base_name, ext = os.path.splitext(os.path.basename("rb.png"))
-            save_file = os.path.join(os.path.dirname("rb.png"), f"{base_name}_no_bg{ext}")
-            processed_image.save(save_file)
-            loggerApp.info(f"Processed image saved at: {save_file}")
             return Image.open(io.BytesIO(response.content))
         else:
             loggerErr.error(f"ERROR: {response.status_code}")
-            return image  # Retornar la imagen original en caso de error
+            return image
 
     except Exception as e:
         loggerErr.error(f"ERROR: {e}")
-        return image  # Retornar la imagen original en caso de excepción
+        return image
 
 
 def info_folder_recursive(path):
