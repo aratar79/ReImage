@@ -14,339 +14,234 @@ from PIL import Image
 from tabulate import tabulate
 from dotenv import load_dotenv
 
-global no_processed_files
-global processed_files
-global format_date
 
+class ImageProcessor:
+    def __init__(self):
+        self.no_processed_files = []
+        self.processed_files = []
+        self.backup_dir = None
+        self.max_file_weight = None
+        self.img_width = None
+        self.info_mode = False
+        self.bkg_remove = False
+        self.azure_endpoint = None
+        self.azure_key = None
 
-def global_max_weight(weightFile):
-    global MAX_FILE_WEIGHT
-    MAX_FILE_WEIGHT = weightFile
+    def set_max_weight(self, weight):
+        self.max_file_weight = weight
 
+    def set_img_width(self, width):
+        self.img_width = width
 
-def global_width(imgWidth):
-    global IMG_WIDTH
-    IMG_WIDTH = imgWidth
+    def enable_info_mode(self):
+        self.info_mode = True
 
+    def enable_background_removal(self):
+        self.bkg_remove = True
 
-def global_no_processed_files(file):
-    no_processed_files.append(file)
+    def set_backup_directory(self, path):
+        self.backup_dir = os.path.join(path, f"ReImageBKP_{self._get_formatted_date()}")
+        os.makedirs(self.backup_dir, exist_ok=True)
 
+    def load_azure_credentials(self):
+        load_dotenv()
+        self.azure_endpoint = os.getenv("AI_SERVICE_ENDPOINT")
+        self.azure_key = os.getenv("AI_SERVICE_KEY")
 
-def global_processed_files(file):
-    processed_files.append(file)
+    def _get_formatted_date(self):
+        return datetime.now().strftime("%Y_%m_%d_%H%M")
 
+    def log_unprocessed_file(self, file):
+        self.no_processed_files.append(file)
 
-def global_backup(path):
-    global BACKUP
-    BACKUP = os.path.join(path, "ReImageBKP_" + format_date)
-    os.makedirs(BACKUP, exist_ok=True)
+    def log_processed_file(self, file):
+        self.processed_files.append(file)
 
+    def process_file(self, file, verbose=False, resize=False, use_ai=True):
+        if not os.path.exists(file):
+            loggerErr.error(f"The file {file} does not exist.")
+            self._print_and_exit(f"The file {file} does not exist.")
 
-def global_info(info):
-    global INFO
-    INFO = info
+        self._backup_file(file)
 
+        if self.info_mode:
+            images = [self._get_image_info(file)]
+            self._print_image_info(images)
+            return
 
-def global_brm(background_remove):
-    global BKG_REMOVE
-    BKG_REMOVE = background_remove
+        img = self._open_image(file)
+        if img:
+            processed = False
 
-
-def global_azure_creds():
-    load_dotenv()
-    global AZURE_ENDPOINT, AZURE_KEY
-    AZURE_ENDPOINT = os.getenv("AI_SERVICE_ENDPOINT")
-    AZURE_KEY = os.getenv("AI_SERVICE_KEY")
-
-
-def process_only_file(file, verbose=False, resize=False):
-    rm_bkg_option = False
-    if not os.path.exists(file):
-        loggerErr.error(f"The file {file} does not exist.")
-        loggerErr.error("Process finished.")
-        print(f"\nThe file {file} does not exist.")
-        print("Process finished.")
-        sys.exit()
-
-    if BACKUP:
-        loggerApp.info("Start backup....")
-        loggerApp.info(f"BKP FILE: {file}")
-        backup_path = os.path.join(BACKUP, os.path.basename(file))
-        shutil.copy(file, backup_path)
-
-    if INFO:
-        images = [get_info_image(file)]
-        print_info_image(images)
-        return
-
-    if BKG_REMOVE:
-        rm_bkg_option = True
-
-    process_file(file, verbose, resize, rm_bkg_option)
-
-
-def process_folder(path, resize=False):
-    content = [
-        os.path.join(path, f)
-        for f in os.listdir(path)
-        if os.path.isfile(os.path.join(path, f))
-    ]
-
-    if BACKUP:
-        loggerApp.info("Start backup....")
-        for file in tqdm(content, ascii=True, desc="Create image backup"):
-            if filetype.is_image(
-                    file
-            ):
-                loggerApp.info(
-                    f"BKP FILE: {os.path.basename(file)}"
-                )
-                backup_path = os.path.join(BACKUP, os.path.basename(file))
-                os.makedirs(
-                    os.path.dirname(backup_path), exist_ok=True
-                )
-                shutil.copy(file, backup_path)
-
-    if INFO:
-        path = os.path.abspath(path)
-        folder_content = [os.path.join(path, f) for f in os.listdir(path)]
-        images = [get_info_image(img_path) for img_path in folder_content]
-        print_info_image(images)
-        return
-
-    for file in tqdm(content, ascii=True, desc="Image processing"):
-        process_file(file, False, resize)
-
-
-def process_folder_recursive(path, resize=False):
-    images = []
-
-    if BACKUP:
-        loggerApp.info("Start backup....")
-        for name_folder, sub_folders, files in tqdm(
-                os.walk(path, topdown=False), ascii=True, desc="Create image backup"
-        ):
-            backup_folder = os.path.basename(BACKUP)
-            loggerApp.info(f"BKP FOLDER: {name_folder}")
-            if name_folder and backup_folder in name_folder:
-                continue
-            backup_path = os.path.join(BACKUP, name_folder)
-            os.makedirs(backup_path, exist_ok=True)
-            for file in files:
-                if filetype.is_image(os.path.join(name_folder, file)):
-                    loggerApp.info(f"BKP FILE: {file}")
-                    shutil.copy(
-                        os.path.join(name_folder, file),
-                        os.path.join(backup_path, file),
-                    )
-
-    if INFO:
-        path = os.path.abspath(path)
-        for name_folder, sub_folders, files in os.walk(path, topdown=False):
-            for file in files:
-                images.append(get_info_image(os.path.join(name_folder, file)))
-        print_info_image(images)
-        return
-
-    for name_folder, sub_folders, files in tqdm(
-            os.walk(path, topdown=False), ascii=True, desc="Image processing"
-    ):
-        for file in files:
-            if BACKUP:
-                backup_folder = os.path.basename(BACKUP)
-                if name_folder and backup_folder in name_folder:
-                    continue
-                process_file(os.path.join(name_folder, file), False)
-            else:
-                if name_folder:
-                    process_file(os.path.join(name_folder, file), False, resize)
-
-
-def process_file(file, verbose=False, resize=False, bkg_remover=False):
-    try:
-        processed = False
-        img = Image.open(file)
-
-        if bkg_remover:
-            img = remove_background(img)
-            if bkg_remover and not resize:
+            if self.bkg_remove:
+                img = self._remove_background(img, file, use_ai)
                 processed = True
-        if resize:
-            width, height = img.size
-            img = img.convert("RGB")
-            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
-            loggerApp.info(
-                f"File to process: {file}, is an image: {filetype.is_image(file)}, "
-                f"File width: {width} px, change to: {IMG_WIDTH}"
-            )
-            radio = max(IMG_WIDTH / img.size[0], 0 / img.size[1])
-            new_width = int(img.size[0] * radio)
-            new_height = int(img.size[1] * radio)
-            img = img.resize((new_width, new_height))
-            processed = True
+
+            if resize:
+                img = self._resize_image(img, file)
+                processed = True
+
+            if self.max_file_weight is not None:
+                img, weight_processed = self._reduce_image_weight(img, file)
+                processed = processed or weight_processed
+
+            if processed:
+                self._save_processed_image(img, file, processed, verbose)
+
+    def process_folder(self, path, recursive=False, resize=False):
+        content = self._get_folder_content(path, recursive)
+
+        self._backup_files(content)
+        if self.info_mode:
+            images = [self._get_image_info(file) for file in content]
+            self._print_image_info(images)
+            return
+
+        for file in tqdm(content, ascii=True, desc="Image processing"):
+            self.process_file(file, resize=resize)
+
+    def _get_folder_content(self, path, recursive):
+        if recursive:
+            return [os.path.join(root, file) for root, _, files in os.walk(path) for file in files if
+                    os.path.isfile(os.path.join(root, file))]
         else:
-            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
-            loggerApp.info(
-                f"File to process: {file}, is an image: {filetype.is_image(file)}, "
-                f"File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
-            )
+            return [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
 
-            if weight > MAX_FILE_WEIGHT and filetype.is_image(file):
-                loggerApp.info("The file fulfils the conditions")
-                img = img.convert("RGB")
-                width, height = img.size
-                scale = float("{0:.2f}".format(math.sqrt(MAX_FILE_WEIGHT / weight)))
-                new_width = int(width * scale)
-                new_height = int(height * scale)
-                img = img.resize((new_width, new_height))
-                processed = True
-            else:
-                loggerApp.info(
-                    "The file does not meet the conditions, either it is not an image"
-                    " or it is too large."
-                )
-                global_no_processed_files(file)
+    def _backup_files(self, files):
+        if self.backup_dir:
+            loggerApp.info("Start backup....")
+            for file in tqdm(files, ascii=True, desc="Create image backup"):
+                if filetype.is_image(file):
+                    loggerApp.info(f"BKP FILE: {os.path.basename(file)}")
+                    backup_path = os.path.join(self.backup_dir, os.path.basename(file))
+                    shutil.copy(file, backup_path)
 
-    except Exception as e:
-        loggerErr.error(
-            f"File to process: {file}, is an image: filetype.is_image(file), "
-            f"File weight: {weight} Kb, Maximum weight allowed: {MAX_FILE_WEIGHT}"
-        )
-        loggerErr.error("The file has not been processed, an error has occurred.")
-        loggerErr.error("ERROR: {e}")
-        global_no_processed_files(file)
-        pass
+    def _backup_file(self, file):
+        if self.backup_dir:
+            loggerApp.info(f"BKP FILE: {file}")
+            backup_path = os.path.join(self.backup_dir, os.path.basename(file))
+            shutil.copy(file, backup_path)
 
-    finally:
+    def _open_image(self, file):
+        try:
+            return Image.open(file)
+        except Exception as e:
+            loggerErr.error(f"Error opening file: {file}, ERROR: {e}")
+            self.log_unprocessed_file(file)
+            return None
+
+    def _resize_image(self, img, file):
+        width, height = img.size
+        loggerApp.info(f"Resizing image {file} to width: {self.img_width}")
+        ratio = max(self.img_width / width, 0 / height)
+        new_width = int(width * ratio)
+        new_height = int(height * ratio)
+        return img.resize((new_width, new_height))
+
+    def _reduce_image_weight(self, img, file):
+        weight = os.path.getsize(file) / 1024
+        if float(weight) > float(self.max_file_weight):
+            loggerApp.info(f"Reducing weight of file {file}")
+            scale = math.sqrt(self.max_file_weight / weight)
+            new_width, new_height = int(img.width * scale), int(img.height * scale)
+            return img.resize((new_width, new_height)), True
+        return img, False
+
+    def _save_processed_image(self, img, file, processed, verbose):
         if processed:
             try:
-                width, height = img.size
-                img.save(file)
-                new_weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
-                loggerApp.info(
-                    f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
-                    f"and {width}x{height}"
-                )
-                loggerApp.info("file saved and processed")
-                global_processed_files(file)
+                save_file = file
+                if self.bkg_remove and img.mode == "RGBA":
+                    save_file = self._get_transparent_save_path(file)
+
+                img.save(save_file)
+                new_weight = os.path.getsize(save_file) / 1024
+                loggerApp.info(f"File processed and saved: {save_file} | New weight: {new_weight} KB")
+                self.log_processed_file(save_file)
                 if verbose:
-                    print(
-                        f"Original weight: {weight} KB, after ReImage: {new_weight} KB"
-                    )
+                    print(f"File processed: {save_file} | New weight: {new_weight} KB")
             except Exception as e:
-                loggerErr.error(
-                    f"The file {file} has not been saved, an error has occurred."
-                )
-                loggerErr.error(f"ERROR: {e}")
+                loggerErr.error(f"Error saving file {file}: {e}")
+                self.log_unprocessed_file(file)
 
+    def _remove_background(self, img, file, use_ai=True):
+        if not use_ai and img.format == "PNG":
+            loggerApp.info(f"Removing background locally for file {file}")
+            img = img.convert("RGBA")
+            data = img.getdata()
 
-def remove_background(image):
-    try:
-        # Convertir la imagen a un objeto de bytes
-        image_byte_array = io.BytesIO()
-        image.save(image_byte_array, format=image.format)
-        image_byte_array = image_byte_array.getvalue()
+            background_color = (255, 255, 255, 255)
 
-        response = requests.post(
-            url=f"{AZURE_ENDPOINT}/computervision/imageanalysis:segment?api-version=2023-02-01-preview&mode=backgroundRemoval",
-            headers={
-                "Ocp-Apim-Subscription-Key": AZURE_KEY,
-                "Content-Type": "application/octet-stream"
-            },
-            data=image_byte_array
-        )
+            new_data = []
+            for item in data:
+                if item[:3] == background_color[:3]:
+                    new_data.append((255, 255, 255, 0))
+                else:
+                    new_data.append(item)
 
-        if response.status_code == 200:
-            loggerApp.info(f"remove background {response.status_code} processed")
-            return Image.open(io.BytesIO(response.content))
-        else:
-            loggerErr.error(f"ERROR: {response.status_code}")
-            return image
+            img.putdata(new_data)
+            return img
 
-    except Exception as e:
-        loggerErr.error(f"ERROR: {e}")
-        return image
+        try:
+            image_byte_array = io.BytesIO()
+            img.save(image_byte_array, format=img.format)
+            image_byte_array = image_byte_array.getvalue()
 
+            response = requests.post(
+                url=f"{self.azure_endpoint}/computervision/imageanalysis:segment?api-version=2023-02-01-preview&mode=backgroundRemoval",
+                headers={
+                    "Ocp-Apim-Subscription-Key": self.azure_key,
+                    "Content-Type": "application/octet-stream"
+                },
+                data=image_byte_array
+            )
 
-def info_folder_recursive(path):
-    pass
-
-
-def print_info_image(images):
-    filterded_images = [i for i in images if i is not None]
-    header_info = [
-        "idx",
-        "File Name",
-        "Size",
-        "Ratio",
-        "Orientation",
-        "Format",
-        "Dpi's",
-        "Mode",
-        "Weight",
-    ]
-    print("\n")
-    print(
-        tabulate(
-            filterded_images, headers=header_info, showindex="always", tablefmt="simple"
-        )
-    )
-    print("\n")
-
-
-def get_info_image(file):
-    result = []
-    try:
-        if filetype.is_image(file):
-            image = Image.open(file)
-            # get width and height
-            width, height = image.size
-            # get image ratio
-            ratio = ""
-            rt = width / height
-            rt = float("{0:.2f}".format(rt))
-            if rt == 1:
-                ratio = "1:1"
-            elif rt == 1.33:
-                ratio = "4:3"
-            elif rt == 1.50:
-                ratio = "3:2"
+            if response.status_code == 200:
+                loggerApp.info(f"Background removal using AI successful for file {file}")
+                return Image.open(io.BytesIO(response.content)).convert("RGBA")
             else:
-                ratio = "Don't know"
-            # get image orientation
-            orientation = ""
-            if width > height:
-                orientation = "Horizontal"
-            if width < height:
-                orientation = "Vertical"
-            if width == height:
-                orientation = "Equals"
-            # get image format
-            formt = image.format
-            # get image mode
-            mode = image.mode
-            # get image dpi's
-            dpi = image.info.get("dpi")
-            # get image Weight
-            weight = float("{0:.2f}".format(os.path.getsize(file) / 1024))
+                loggerErr.error(
+                    f"Background removal using AI failed for file {file} with status code {response.status_code}")
+                return img
 
-            result.append(os.path.split(file)[-1])
-            result.append({f"w:{width}", f"h:{height}"})
-            result.append(ratio)
-            result.append(orientation)
-            result.append(formt)
-            result.append(dpi)
-            result.append(mode)
-            result.append(f"{weight} KB")
+        except Exception as e:
+            loggerErr.error(f"Error removing background for file {file} using AI: {e}")
+            return img
 
-            return result
+    def _get_transparent_save_path(self, file):
+        base_name, ext = os.path.splitext(os.path.basename(file))
+        return os.path.join(os.path.dirname(file), f"{base_name}_no_bg{ext}")
 
-    except Exception as e:
-        loggerErr.error(
-            f"Checking the image information: {file} an error has occurred."
-        )
-        loggerErr.error(f"ERROR: {e}")
+    def _get_image_info(self, file):
+        try:
+            if filetype.is_image(file):
+                img = Image.open(file)
+                width, height = img.size
+                ratio = f"{width / height:.2f}"
+                orientation = "Horizontal" if width > height else "Vertical" if width < height else "Square"
+                return [
+                    os.path.basename(file),
+                    f"w:{width}, h:{height}",
+                    ratio,
+                    orientation,
+                    img.format,
+                    img.info.get("dpi"),
+                    img.mode,
+                    f"{os.path.getsize(file) / 1024:.2f} KB"
+                ]
+        except Exception as e:
+            loggerErr.error(f"Error retrieving image info for {file}: {e}")
+        return None
+
+    def _print_image_info(self, images):
+        filtered_images = [i for i in images if i is not None]
+        headers = ["File Name", "Dimensions", "Ratio", "Orientation", "Format", "Dpi's", "Mode", "Weight"]
+        print(tabulate(filtered_images, headers=headers, showindex="always", tablefmt="simple"))
+
+    def _print_and_exit(self, message):
+        loggerErr.error(message)
+        print(message)
+        sys.exit()
 
 
 def setup_logger(name, log_file, level=logging.INFO):
@@ -362,172 +257,57 @@ def setup_logger(name, log_file, level=logging.INFO):
 
 
 def logger_config():
-    try:
-        global loggerApp
-        global loggerErr
-        global loggerNoProcess
-
-        loggerApp = setup_logger("info_logger", "reimage.info.log")
-        loggerErr = setup_logger("error_logger", "reimage.error.log", logging.ERROR)
-        loggerNoProcess = setup_logger(
-            "noprocess_logger", "reimage.noprocess.log", logging.WARNING
-        )
-
-    except Exception as e:
-        print(
-            "Error creating the log files, possibly you do not have permissions and will not be able to continue the process. "
-            + "Raise the permissions of your terminal or contact your system administrator."
-        )
+    global loggerApp, loggerErr, loggerNoProcess
+    loggerApp = setup_logger("info_logger", "reimage.info.log")
+    loggerErr = setup_logger("error_logger", "reimage.error.log", logging.ERROR)
+    loggerNoProcess = setup_logger("noprocess_logger", "reimage.noprocess.log", logging.WARNING)
 
 
-def main(argv):
-    try:
-        parser = argv
+def main():
+    parser = argparse.ArgumentParser(description="Program to reduce image size or change image properties.")
+    parser.add_argument("-cw", "--change-max-weight", help="Reduce image size to a maximum weight in KB.", type=int)
+    parser.add_argument("-i", "--info", help="Show image information.", action="store_true")
+    parser.add_argument("-f", "--file", help="File to process.")
+    parser.add_argument("-a", "--all", help="Process all files in the specified directory.", metavar="PATH")
+    parser.add_argument("-bkp", "--backup", help="Backup original files to specified directory.", metavar="BACKUP_PATH")
+    parser.add_argument("-R", "--recursive", help="Process files recursively in directories.", action="store_true")
+    parser.add_argument("-r", "--resize", help="Resize images to a specified width.", type=int, metavar="WIDTH")
+    parser.add_argument("-rb", "--remove-background", help="Remove background from images.", action="store_true")
+    parser.add_argument("-noai", "--no-ai", help="Remove background without using AI for PNG files.", action="store_true")
 
-        parser.add_argument(
-            "-cw",
-            "--change-max-weight",
-            help="Reduces an image up to a maximum weight in Kbytes.",
-            type=int,
-            default=0,
-            metavar=("MAXWEIGHT"),
-        )
-        parser.add_argument(
-            "-i",
-            "--info",
-            help="Returns information related to the image(s)",
-            action="store_true",
-        )
-        parser.add_argument("-f", "--file", help="Name of the file to be processed.")
-        parser.add_argument(
-            "-a", "--all", help="Processes all files in the folder", metavar=("PATH")
-        )
+    args = parser.parse_args()
+    processor = ImageProcessor()
 
-        parser.add_argument(
-            "-bkp",
-            "--backup",
-            help="Creates a copy of the original files in a given destination",
-            metavar=("BACKUP PATH"),
-        )
+    if args.backup:
+        processor.set_backup_directory(args.backup)
 
-        parser.add_argument(
-            "-R",
-            "--recursive",
-            help="Processes all files recursively in the folder and subfolders",
-            action="store_true",
-        )
+    if args.change_max_weight:
+        processor.set_max_weight(args.change_max_weight)
 
-        parser.add_argument(
-            "-r",
-            "--resize",
-            help="Resize images while maintaining aspect ratio",
-            type=int,
-            default=0,
-            metavar=("WIDTH"),
-        )
+    if args.resize:
+        processor.set_img_width(args.resize)
 
-        parser.add_argument(
-            "-rb",
-            "--remove-background",
-            help="Remove image background using Azure AI Services",
-            action="store_true"
-        )
+    if args.info:
+        processor.enable_info_mode()
 
-        arguments = parser.parse_args()
+    if args.remove_background:
+        processor.enable_background_removal()
 
-        loggerApp.info("Run process...")
+    processor.load_azure_credentials()
 
-        if arguments.remove_background:
-            global_brm(True)
+    if args.file:
+        processor.process_file(args.file, resize=args.resize is not None, use_ai=not args.no_ai)
+    elif args.all:
+        processor.process_folder(args.all, recursive=args.recursive, resize=args.resize is not None)
+    else:
+        parser.print_help()
 
-        if arguments.backup:
-            pathname = os.path.abspath(arguments.backup)
-            loggerApp.info(f"Backup enabled on the path: {pathname}")
-            global_backup(arguments.backup)
-        else:
-            global BACKUP
-            BACKUP = False
-
-        if arguments.change_max_weight:
-            global_max_weight(float(arguments.change_max_weight))
-
-            if arguments.change_max_weight and arguments.resize:
-                print("Error in flag and arguments combination")
-                parser.print_help()
-
-            if arguments.file:
-                loggerApp.info("Start the process for a single file")
-                process_only_file(arguments.file, True)
-            elif arguments.all and arguments.file is None:
-                if arguments.recursive:
-                    loggerApp.info(
-                        "Start the recursive process, all the files and directories"
-                    )
-                    process_folder_recursive(arguments.all)
-                else:
-                    loggerApp.info("Start the process for all files in the directory")
-                    process_folder(arguments.all)
-            else:
-                print("Error in flag and arguments combination")
-                parser.print_help()
-        elif arguments.info:
-            global_info(True)
-            if arguments.file:
-                process_only_file(arguments.file)
-            if arguments.all:
-                if arguments.recursive:
-                    process_folder_recursive(arguments.all)
-                else:
-                    process_folder(arguments.all)
-        elif arguments.resize:
-            global_width(float(arguments.resize))
-            if arguments.file:
-                loggerApp.info("Start the process for a single file")
-                process_only_file(arguments.file, True, True)
-            elif arguments.all and arguments.file is None:
-                if arguments.recursive:
-                    loggerApp.info(
-                        "Start the recursive process, all the files and directories"
-                    )
-                    process_folder_recursive(arguments.all, True)
-                else:
-                    loggerApp.info("Start the process for all files in the directory")
-                    process_folder(arguments.all, True)
-            else:
-                print("Error in flag and arguments combination")
-                parser.print_help()
-
-        else:
-            print("Error in flag and arguments combination")
-            parser.print_help()
-
-        print("\n")
-        if not INFO:
-            for nopfile in no_processed_files:
-                loggerNoProcess.warning(f"Not processed file: {nopfile}")
-
-            loggerApp.info(
-                f"\n\nTotal number of files NOT processed: {len(no_processed_files)}"
-            )
-            loggerApp.info(f"Total number of files processed: {len(processed_files)}")
-            print(f"\nTotal number of files NOT processed: {len(no_processed_files)}")
-            print(f"Total number of files processed: {len(processed_files)}")
-
-    except Exception as e:
-        loggerErr.error("Some error has occurred, process terminated")
-        loggerErr.error(f"ERROR: {e}")
+    if not processor.info_mode:
+        print(f"\nTotal files not processed: {len(processor.no_processed_files)}")
+        print(f"Total files processed: {len(processor.processed_files)}")
 
 
 if __name__ == "__main__":
     logger_config()
-    global_info(False)
-    global_azure_creds()
-    no_processed_files = []
-    processed_files = []
-    now = datetime.now()
-    format_date = now.strftime("%Y_%m_%d_%H%M")
-    main(
-        argparse.ArgumentParser(
-            description="Program to reduces an image up to a maximum weight in Kbytes."
-        )
-    )
+    main()
+
